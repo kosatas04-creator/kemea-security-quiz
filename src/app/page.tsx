@@ -13,7 +13,7 @@ import {
   RotateCcw, 
   Tv, 
   Check, 
-  BookOpen,
+  BookOpen, 
   ArrowRight,
   Menu,
   User,
@@ -24,8 +24,7 @@ import {
   FileText,
   Eye,
   EyeOff,
-  Trash2,
-  Settings
+  Trash2
 } from 'lucide-react';
 
 export default function HomePage() {
@@ -59,6 +58,7 @@ export default function HomePage() {
   const [showPassword, setShowPassword] = useState(false);
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [isUpgrading, setIsUpgrading] = useState(false);
 
   // Φόρτωση χρήστη, προφίλ και τοπικών ορίων
   useEffect(() => {
@@ -89,6 +89,49 @@ export default function HomePage() {
     }
     initUser();
   }, []);
+
+  // Έλεγχος URL για επιτυχή επιστροφή από Stripe
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'success') {
+      setSuccessBanner('Η συνδρομή σας ενεργοποιήθηκε επιτυχώς! Καλώς ήρθατε στο PRO.');
+      setTimeout(() => setSuccessBanner(null), 6000);
+    } else if (params.get('payment') === 'cancelled') {
+      alert('Η διαδικασία πληρωμής ακυρώθηκε.');
+    }
+  }, []);
+
+  // Λειτουργία Πληρωμής μέσω Stripe Checkout
+  const handleUpgradeToPro = async () => {
+    if (!user) {
+      setAuthMode('signup');
+      setShowAuthModal(true);
+      return;
+    }
+
+    setIsUpgrading(true);
+    try {
+      const response = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error(data.error || 'Σφάλμα κατά τη σύνδεση με το Stripe.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Παρουσιάστηκε σφάλμα κατά την εκκίνηση της πληρωμής.');
+    } finally {
+      setIsUpgrading(false);
+    }
+  };
 
   // Auth Submit Handler
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -176,7 +219,6 @@ export default function HomePage() {
     setMode('practice');
   };
 
-  // Αλλαγή Password
   const handleUpdatePassword = async () => {
     if (!newPasswordInput || newPasswordInput.length < 6) {
       alert('Ο νέος κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.');
@@ -196,7 +238,6 @@ export default function HomePage() {
     }
   };
 
-  // Διαγραφή Λογαριασμού
   const handleDeleteAccount = async () => {
     const confirmDelete = window.confirm(
       'Είστε απόλυτα σίγουροι ότι θέλετε να διαγράψετε τον λογαριασμό σας; Αυτή η ενέργεια είναι οριστική και μη αναστρέψιμη.'
@@ -366,7 +407,6 @@ export default function HomePage() {
       {/* Αναδυόμενη Αριστερή Στήλη */}
       <aside className="fixed top-0 left-0 h-screen z-50 group flex">
         <div className="w-16 hover:w-64 group-hover:w-64 transition-all duration-300 ease-in-out bg-slate-900/95 backdrop-blur-md border-r border-slate-800 p-2.5 flex flex-col justify-between overflow-hidden shadow-2xl">
-          {/* Top Section: Header & Κατηγορίες */}
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-3 px-1 py-2 border-b border-slate-800 shrink-0">
               <div className="w-9 h-9 flex items-center justify-center shrink-0">
@@ -377,7 +417,6 @@ export default function HomePage() {
               </span>
             </div>
 
-            {/* Επιλογές Κατηγοριών στην Κορυφή */}
             <nav className="flex flex-col gap-2">
               <button
                 onClick={() => { setMode('practice'); setCurrentIdx(0); setIsAnswered(false); }}
@@ -418,7 +457,6 @@ export default function HomePage() {
                 )}
               </button>
 
-              {/* Quiz Λανθασμένων Ερωτήσεων - PRO LOCK */}
               <button
                 onClick={() => { setMode('mistakes'); setCurrentIdx(0); setIsAnswered(false); }}
                 title="Quiz Λανθασμένων Ερωτήσεων"
@@ -441,7 +479,6 @@ export default function HomePage() {
                 )}
               </button>
 
-              {/* Διαχείριση Λογαριασμού */}
               <button
                 onClick={() => {
                   if (!user) {
@@ -468,7 +505,6 @@ export default function HomePage() {
             </nav>
           </div>
 
-          {/* Footer Sidebar: Έκδοση & Όροι & Προϋποθέσεις */}
           <div className="pt-2 border-t border-slate-800 shrink-0">
             <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200">
               <span>KEMEA SaaS v1.0</span>
@@ -486,7 +522,6 @@ export default function HomePage() {
       {/* Main Content Area */}
       <div className="pl-16 flex-1 flex flex-col">
         <main className="max-w-4xl mx-auto w-full px-4 py-6 flex-1 flex flex-col gap-6">
-          {/* Top Google AdSense Placeholder */}
           <div className="w-full bg-slate-900 border border-dashed border-slate-800 rounded-xl py-3 text-center text-xs text-slate-500">
             Διαφήμιση Google AdSense (Top Leaderboard)
           </div>
@@ -509,7 +544,6 @@ export default function HomePage() {
                 </span>
               </div>
 
-              {/* Πληροφορίες Χρήστη */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-1">
                   <span className="text-xs text-slate-400">Username</span>
@@ -522,15 +556,8 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Password Section */}
               <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-5 flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-200">Κωδικός Πρόσβασης (Password)</h3>
-                    <p className="text-xs text-slate-400">Για λόγους ασφαλείας οι κωδικοί κρυπτογραφούνται. Μπορείτε να ορίσετε νέο κωδικό ή να τον δείτε κατά την πληκτρολόγηση.</p>
-                  </div>
-                </div>
-
+                <h3 className="text-sm font-semibold text-slate-200">Κωδικός Πρόσβασης (Password)</h3>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <div className="relative flex-1">
                     <input
@@ -560,7 +587,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Danger Zone: Διαγραφή Λογαριασμού */}
               <div className="bg-rose-950/20 border border-rose-500/20 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mt-2">
                 <div>
                   <h4 className="text-sm font-bold text-rose-400 flex items-center gap-1.5">
@@ -579,20 +605,21 @@ export default function HomePage() {
               </div>
             </div>
           ) : mode === 'mistakes' && profile?.subscription_status !== 'pro' ? (
-            /* Lock Screen για Quiz Λανθασμένων Ερωτήσεων (PRO ONLY) */
+            /* Lock Screen για Quiz Λανθασμένων Ερωτήσεων */
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center gap-4">
               <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-2xl">
                 <Lock className="w-8 h-8" />
               </div>
               <h3 className="text-xl font-bold">Quiz Λανθασμένων Ερωτήσεων (PRO)</h3>
               <p className="text-slate-400 text-sm max-w-md">
-                Αυτή η λειτουργία είναι διαθέσιμη αποκλειστικά για τους <strong>PRO συνδρομητές</strong>. Αποθηκεύει αυτόματα τις ερωτήσεις στις οποίες κάνατε λάθος ώστε να τις επαναλαμβάνετε στοχευμένα μέχρι να πετύχετε το 100%!
+                Αυτή η λειτουργία είναι διαθέσιμη αποκλειστικά για τους <strong>PRO συνδρομητές</strong>. Αποθηκεύει αυτόματα τις ερωτήσεις στις οποίες κάνατε λάθος ώστε να τις επαναλαμβάνετε στοχευμένα!
               </p>
               <button 
-                onClick={() => alert('Στο βήμα της Stripe θα συνδέσουμε την πληρωμή!')}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-6 py-2.5 rounded-xl transition text-sm"
+                onClick={handleUpgradeToPro}
+                disabled={isUpgrading}
+                className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold px-6 py-2.5 rounded-xl transition text-sm flex items-center gap-2"
               >
-                Αναβάθμιση σε Pro
+                {isUpgrading ? 'Μεταφορά στο Ταμείο...' : 'Αναβάθμιση σε Pro (9.99€/μήνα)'}
               </button>
             </div>
           ) : mode === 'mock' && profile?.subscription_status !== 'pro' ? (
@@ -606,10 +633,11 @@ export default function HomePage() {
                 Αποκτήστε πρόσβαση σε 15 ρεαλιστικές προσομοιώσεις εξετάσεων πιστοποίησης Security με 20 ερωτήσεις και χρονόμετρο 60 λεπτών, χωρίς διαφημίσεις.
               </p>
               <button 
-                onClick={() => alert('Στο βήμα της Stripe θα συνδέσουμε την πληρωμή!')}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-6 py-2.5 rounded-xl transition text-sm"
+                onClick={handleUpgradeToPro}
+                disabled={isUpgrading}
+                className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold px-6 py-2.5 rounded-xl transition text-sm flex items-center gap-2"
               >
-                Αναβάθμιση σε Pro
+                {isUpgrading ? 'Μεταφορά στο Ταμείο...' : 'Αναβάθμιση σε Pro (9.99€/μήνα)'}
               </button>
             </div>
           ) : isLimitReached ? (
@@ -644,9 +672,18 @@ export default function HomePage() {
                   </button>
                 </>
               ) : (
-                <p className="text-slate-400 text-sm max-w-md">
-                  Φτάσατε το μέγιστο όριο των <strong>30 ερωτήσεων</strong> για σήμερα. Επιστρέψτε αύριο ή αναβαθμίστε σε Pro για απεριόριστη πρόσβαση.
-                </p>
+                <div className="flex flex-col items-center gap-3">
+                  <p className="text-slate-400 text-sm max-w-md">
+                    Φτάσατε το μέγιστο όριο των <strong>30 ερωτήσεων</strong> για σήμερα. Επιστρέψτε αύριο ή αναβαθμίστε σε Pro για απεριόριστη πρόσβαση.
+                  </p>
+                  <button
+                    onClick={handleUpgradeToPro}
+                    disabled={isUpgrading}
+                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2 rounded-xl transition text-xs"
+                  >
+                    {isUpgrading ? 'Μεταφορά...' : 'Απεριόριστα με Pro'}
+                  </button>
+                </div>
               )}
             </div>
           ) : isExamCompleted ? (
@@ -718,7 +755,6 @@ export default function HomePage() {
                 })}
               </div>
 
-              {/* Κουμπί Επόμενης Ερώτησης */}
               {isAnswered && (
                 <div className="flex justify-end pt-3 border-t border-slate-800">
                   <button
@@ -732,7 +768,6 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Bottom Google AdSense Placeholder */}
           <div className="w-full bg-slate-900 border border-dashed border-slate-800 rounded-xl py-3 text-center text-xs text-slate-500">
             Διαφήμιση Google AdSense (Bottom Leaderboard)
           </div>
