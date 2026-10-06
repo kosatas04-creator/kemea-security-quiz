@@ -24,7 +24,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err.message }, { status: 400 });
   }
 
-  // Όταν η πληρωμή συνδρομής ολοκληρωθεί επιτυχώς
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as Stripe.Checkout.Session;
     const userId = session.metadata?.userId;
@@ -39,3 +38,4 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ received: true });
+}
