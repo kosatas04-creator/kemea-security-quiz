@@ -7,7 +7,7 @@ const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'Security Quiz - ΕΟΠΠΕΠ/ΚΕΜΕΑ',
-  description: 'Πλατφόρμα προετοιμασίας για εξετάσεις Security με Προσομοιώσεις και Quiz Λανθασμένων.',
+  description: 'Πλατφόρμα προετοιμασίας για εξετάσεις Security με Προσομοιώσεις.',
 }
 
 export default function RootLayout({
