@@ -24,14 +24,18 @@ import {
   FileText,
   Eye,
   EyeOff,
-  Trash2
+  Trash2,
+  Sparkles,
+  CreditCard,
+  Smartphone,
+  Bitcoin
 } from 'lucide-react';
 
 export default function HomePage() {
   const supabase = createClient();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
-  const [mode, setMode] = useState<'practice' | 'mock' | 'mistakes' | 'account'>('practice');
+  const [mode, setMode] = useState<'practice' | 'mock' | 'mistakes' | 'account' | 'pricing'>('practice');
   const [selectedMockId, setSelectedMockId] = useState<number>(1);
   
   // Quiz state
@@ -42,6 +46,10 @@ export default function HomePage() {
   const [guestCount, setGuestCount] = useState(0);
   const [timeLeft, setTimeLeft] = useState(60 * 60);
   const [isExamCompleted, setIsExamCompleted] = useState(false);
+
+  // Λανθασμένες ερωτήσεις (IDs) + στιγμιότυπο της τρέχουσας συνεδρίας του "Quiz Λανθασμένων"
+  const [mistakeIds, setMistakeIds] = useState<number[]>([]);
+  const [mistakesSession, setMistakesSession] = useState<Question[]>([]);
 
   // Auth Modal & Notification State
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -60,7 +68,14 @@ export default function HomePage() {
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
   const [isUpgrading, setIsUpgrading] = useState(false);
 
-  // Φόρτωση χρήστη, προφίλ και τοπικών ορίων
+  // Ξεκλείδωμα ΜΟΝΟ για development (npm run dev). Στο production είναι πάντα false.
+  const isDevUnlocked = process.env.NODE_ENV === 'development';
+  // Πρόσβαση PRO: πραγματική συνδρομή ή dev ξεκλείδωμα
+  const hasPro = profile?.subscription_status === 'pro' || isDevUnlocked;
+
+  // Κλειδί αποθήκευσης λανθασμένων (ξεχωριστό ανά χρήστη)
+  const mistakesKey = `mistakes_${user?.id || 'guest'}`;
+
   useEffect(() => {
     async function initUser() {
       const { data: { user } } = await supabase.auth.getUser();
@@ -90,7 +105,17 @@ export default function HomePage() {
     initUser();
   }, []);
 
-  // Έλεγχος URL για επιτυχή επιστροφή από Stripe
+  // Φόρτωση λανθασμένων ερωτήσεων όταν αλλάζει ο χρήστης
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(mistakesKey);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setMistakeIds(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setMistakeIds([]);
+    }
+  }, [mistakesKey]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('payment') === 'success') {
@@ -101,39 +126,6 @@ export default function HomePage() {
     }
   }, []);
 
-  // Λειτουργία Πληρωμής μέσω Stripe Checkout
-  const handleUpgradeToPro = async () => {
-    if (!user) {
-      setAuthMode('signup');
-      setShowAuthModal(true);
-      return;
-    }
-
-    setIsUpgrading(true);
-    try {
-      const response = await fetch('/api/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          email: user.email,
-        }),
-      });
-
-      const data = await response.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        throw new Error(data.error || 'Σφάλμα κατά τη σύνδεση με το Stripe.');
-      }
-    } catch (err: any) {
-      alert(err.message || 'Παρουσιάστηκε σφάλμα κατά την εκκίνηση της πληρωμής.');
-    } finally {
-      setIsUpgrading(false);
-    }
-  };
-
-  // Auth Submit Handler
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthLoading(true);
@@ -217,6 +209,12 @@ export default function HomePage() {
     setUser(null);
     setProfile(null);
     setMode('practice');
+    setMistakesSession([]);
+    setCurrentIdx(0);
+    setScore(0);
+    setSelectedAnswer(null);
+    setIsAnswered(false);
+    setIsExamCompleted(false);
   };
 
   const handleUpdatePassword = async () => {
@@ -246,6 +244,7 @@ export default function HomePage() {
 
     try {
       await supabase.from('profiles').delete().eq('id', user.id);
+      try { localStorage.removeItem(mistakesKey); } catch {}
       await supabase.auth.signOut();
       setUser(null);
       setProfile(null);
@@ -257,10 +256,42 @@ export default function HomePage() {
     }
   };
 
+  // ---- Διαχείριση λανθασμένων ερωτήσεων ----
+  const saveMistakes = (next: number[]) => {
+    setMistakeIds(next);
+    try {
+      localStorage.setItem(mistakesKey, JSON.stringify(next));
+    } catch {}
+  };
+
+  const addMistake = (id: number) => {
+    if (mistakeIds.includes(id)) return;
+    saveMistakes([...mistakeIds, id]);
+  };
+
+  const removeMistake = (id: number) => {
+    if (!mistakeIds.includes(id)) return;
+    saveMistakes(mistakeIds.filter((m) => m !== id));
+  };
+
+  // Ξεκινάει νέα συνεδρία "Quiz Λανθασμένων" με τις ερωτήσεις που έχουν απομείνει
+  const startMistakesSession = () => {
+    const questions = QUESTIONS.filter((q) => mistakeIds.includes(q.id));
+    setMistakesSession(questions);
+    setCurrentIdx(0);
+    setScore(0);
+    setSelectedAnswer(null);
+    setIsAnswered(false);
+    setIsExamCompleted(false);
+  };
+
   // Mock Exam logic
   const activeQuestions: Question[] = useMemo(() => {
     if (mode === 'practice') {
       return QUESTIONS;
+    }
+    if (mode === 'mistakes') {
+      return mistakesSession;
     }
     const shuffled = [...QUESTIONS].sort((a, b) => {
       const seedA = (a.id * 9301 + 49297 + selectedMockId * 233) % 233280;
@@ -268,19 +299,20 @@ export default function HomePage() {
       return seedA - seedB;
     });
     return shuffled.slice(0, 20);
-  }, [mode, selectedMockId]);
+  }, [mode, selectedMockId, mistakesSession]);
 
   // Χρονόμετρο 60 λεπτών
   useEffect(() => {
     if (mode === 'mock' && !isExamCompleted && timeLeft > 0) {
       const timer = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
       return () => clearInterval(timer);
-    } else if (timeLeft === 0 && !isExamCompleted) {
+    } else if (mode === 'mock' && timeLeft === 0 && !isExamCompleted) {
       setIsExamCompleted(true);
     }
   }, [mode, timeLeft, isExamCompleted]);
 
   const getDailyLimit = () => {
+    if (isDevUnlocked) return 999999;
     if (!user) return 5;
     if (profile?.subscription_status === 'pro') return 999999;
     return 20 + (profile?.ad_bonus_count || 0) * 5;
@@ -291,11 +323,25 @@ export default function HomePage() {
 
   const handleSelectAnswer = async (index: number) => {
     if (isAnswered) return;
+    const question = activeQuestions[currentIdx];
+    if (!question) return;
+
     setSelectedAnswer(index);
     setIsAnswered(true);
 
-    const isCorrect = index === activeQuestions[currentIdx].correct;
+    const isCorrect = index === question.correct;
     if (isCorrect) setScore((prev) => prev + 1);
+
+    // Καταγραφή / αφαίρεση λανθασμένων ερωτήσεων
+    if (mode === 'practice' || mode === 'mock') {
+      if (!isCorrect) addMistake(question.id);
+    } else if (mode === 'mistakes') {
+      if (isCorrect) {
+        removeMistake(question.id);
+      } else {
+        addMistake(question.id);
+      }
+    }
 
     if (mode === 'practice') {
       if (!user) {
@@ -351,6 +397,16 @@ export default function HomePage() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleMockCheckout = (plan: 'monthly' | 'lifetime', method: 'card' | 'btc') => {
+    if (!user) {
+      setAuthMode('signup');
+      setShowAuthModal(true);
+      return;
+    }
+    // Εδώ στο μέλλον θα καλείται το Stripe ή το Crypto payment gateway.
+    alert(`Έτοιμο για διασύνδεση API! Επιλογή: ${plan} / Τρόπος: ${method}`);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Success Notification Banner */}
@@ -375,6 +431,14 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-3 text-sm">
+            {isDevUnlocked && (
+              <span
+                title="Dev mode: όλες οι PRO κατηγορίες είναι ξεκλείδωτες (μόνο στο npm run dev)"
+                className="text-[10px] font-extrabold tracking-wider text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-md"
+              >
+                DEV
+              </span>
+            )}
             {user ? (
               <div className="flex items-center gap-3">
                 <button
@@ -419,7 +483,14 @@ export default function HomePage() {
 
             <nav className="flex flex-col gap-2">
               <button
-                onClick={() => { setMode('practice'); setCurrentIdx(0); setIsAnswered(false); }}
+                onClick={() => {
+                  setMode('practice');
+                  setCurrentIdx(0);
+                  setScore(0);
+                  setSelectedAnswer(null);
+                  setIsAnswered(false);
+                  setIsExamCompleted(false);
+                }}
                 title="Quiz"
                 className={`w-full h-11 px-1 rounded-xl flex items-center gap-3 transition ${
                   mode === 'practice'
@@ -436,7 +507,13 @@ export default function HomePage() {
               </button>
 
               <button
-                onClick={() => { setMode('mock'); resetExam(1); }}
+                onClick={() => {
+                  if (hasPro) {
+                    setMode('mock'); resetExam(1);
+                  } else {
+                    setMode('pricing');
+                  }
+                }}
                 title="Προσομοίωση Εξετάσεων"
                 className={`w-full h-11 px-1 rounded-xl flex items-center justify-between transition ${
                   mode === 'mock'
@@ -452,13 +529,20 @@ export default function HomePage() {
                     Προσομοίωση Εξετάσεων
                   </span>
                 </div>
-                {profile?.subscription_status !== 'pro' && (
+                {!hasPro && (
                   <Lock className="w-3.5 h-3.5 text-amber-400/80 shrink-0 mr-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
                 )}
               </button>
 
               <button
-                onClick={() => { setMode('mistakes'); setCurrentIdx(0); setIsAnswered(false); }}
+                onClick={() => {
+                  if (hasPro) {
+                    setMode('mistakes');
+                    startMistakesSession();
+                  } else {
+                    setMode('pricing');
+                  }
+                }}
                 title="Quiz Λανθασμένων Ερωτήσεων"
                 className={`w-full h-11 px-1 rounded-xl flex items-center justify-between transition ${
                   mode === 'mistakes'
@@ -474,7 +558,7 @@ export default function HomePage() {
                     Quiz Λανθασμένων
                   </span>
                 </div>
-                {profile?.subscription_status !== 'pro' && (
+                {!hasPro && (
                   <Lock className="w-3.5 h-3.5 text-amber-400/80 shrink-0 mr-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
                 )}
               </button>
@@ -502,6 +586,26 @@ export default function HomePage() {
                   Ο Λογαριασμός μου
                 </span>
               </button>
+
+              {/* Αναβάθμιση σε Pro (ΝΕΑ ΕΠΙΛΟΓΗ) */}
+              {!hasPro && (
+                <button
+                  onClick={() => setMode('pricing')}
+                  title="Αναβάθμιση σε Pro"
+                  className={`w-full h-11 px-1 rounded-xl flex items-center gap-3 transition ${
+                    mode === 'pricing'
+                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                      : 'text-amber-500/70 hover:bg-amber-500/10 hover:text-amber-400 border border-transparent'
+                  }`}
+                >
+                  <div className="w-9 h-9 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <span className="text-sm font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                    Αναβάθμιση σε PRO
+                  </span>
+                </button>
+              )}
             </nav>
           </div>
 
@@ -521,14 +625,169 @@ export default function HomePage() {
 
       {/* Main Content Area */}
       <div className="pl-16 flex-1 flex flex-col">
-        <main className="max-w-4xl mx-auto w-full px-4 py-6 flex-1 flex flex-col gap-6">
-          <div className="w-full bg-slate-900 border border-dashed border-slate-800 rounded-xl py-3 text-center text-xs text-slate-500">
-            Διαφήμιση Google AdSense (Top Leaderboard)
-          </div>
+        <main className="max-w-5xl mx-auto w-full px-4 py-6 flex-1 flex flex-col gap-6">
+          {mode !== 'pricing' && (
+            <div className="w-full bg-slate-900 border border-dashed border-slate-800 rounded-xl py-3 text-center text-xs text-slate-500 max-w-4xl mx-auto">
+              Διαφήμιση Google AdSense (Top Leaderboard)
+            </div>
+          )}
 
-          {/* SECTION: ΔΙΑΧΕΙΡΙΣΗ ΛΟΓΑΡΙΑΣΜΟΥ */}
-          {mode === 'account' ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 flex flex-col gap-6 shadow-xl">
+          {/* Επιλογέας Mock Exam (1–15) */}
+          {mode === 'mock' && (
+            <div className="max-w-4xl mx-auto w-full flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-400 mr-1">Εξέταση:</span>
+              {Array.from({ length: 15 }, (_, i) => i + 1).map((n) => (
+                <button
+                  key={n}
+                  onClick={() => resetExam(n)}
+                  className={`w-9 h-9 rounded-lg text-xs font-bold border transition ${
+                    selectedMockId === n
+                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/40'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* SECTION: PRICING (ΣΥΝΔΡΟΜΕΣ) */}
+          {mode === 'pricing' ? (
+            <div className="flex flex-col items-center justify-center w-full gap-10 py-8">
+              <div className="text-center space-y-3 max-w-2xl">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-full text-xs font-bold mb-2">
+                  <Sparkles className="w-3.5 h-3.5" /> PRO ΕΚΔΟΣΗ
+                </div>
+                <h2 className="text-3xl md:text-4xl font-bold text-slate-100 tracking-tight">Επιλέξτε το πλάνο σας</h2>
+                <p className="text-slate-400 text-sm md:text-base">
+                  Ξεκλειδώστε τα 15 πλήρη Mock Exams, το Quiz Λανθασμένων ερωτήσεων για στοχευμένη επανάληψη και αφαιρέστε οριστικά τις διαφημίσεις.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
+                
+                {/* 1. Μηνιαία Συνδρομή */}
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 flex flex-col gap-6 relative shadow-xl hover:border-slate-700 transition">
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-100">Μηνιαία Συνδρομή</h3>
+                    <p className="text-sm text-slate-400 mt-1">Ανανεώνεται κάθε μήνα, ακύρωση οποτεδήποτε.</p>
+                  </div>
+                  
+                  <div className="flex flex-col gap-3">
+                    {/* Standard Price */}
+                    <button 
+                      onClick={() => handleMockCheckout('monthly', 'card')}
+                      className="flex items-center justify-between p-4 bg-slate-950 rounded-2xl border border-slate-800 hover:border-sky-500/50 transition group"
+                    >
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="text-sm font-medium text-slate-300">Κάρτα / Apple / Google Pay</span>
+                        <div className="flex items-center gap-2 text-slate-500 group-hover:text-sky-400 transition">
+                          <CreditCard className="w-4 h-4" />
+                          <Smartphone className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xl font-bold text-slate-100">4,99€</span>
+                        <span className="text-xs text-slate-500 block">/ μήνα</span>
+                      </div>
+                    </button>
+
+                    {/* Bitcoin Price */}
+                    <button 
+                      onClick={() => handleMockCheckout('monthly', 'btc')}
+                      className="flex items-center justify-between p-4 bg-slate-950 rounded-2xl border border-emerald-500/30 hover:border-emerald-500 transition relative group"
+                    >
+                      {/* Green Badge */}
+                      <div className="absolute -top-2.5 -right-2.5 bg-emerald-500 text-slate-950 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full shadow-lg">
+                        -20%
+                      </div>
+                      
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="text-sm font-medium text-emerald-400">Πληρωμή με Bitcoin</span>
+                        <Bitcoin className="w-4 h-4 text-emerald-500/70 group-hover:text-emerald-400 transition" />
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xl font-bold text-emerald-400">3,99€</span>
+                        <span className="text-xs text-emerald-600 block">/ μήνα</span>
+                      </div>
+                    </button>
+                  </div>
+
+                  <div className="h-px w-full bg-slate-800 my-2"></div>
+                  
+                  <ul className="flex flex-col gap-3 text-sm text-slate-300">
+                    <li className="flex items-start gap-2"><Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /> 15 Πλήρη Mock Exams (60 λεπτά)</li>
+                    <li className="flex items-start gap-2"><Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /> Quiz Λανθασμένων Ερωτήσεων</li>
+                    <li className="flex items-start gap-2"><Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /> Απεριόριστες ημερήσιες ερωτήσεις</li>
+                    <li className="flex items-start gap-2"><Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /> Αφαίρεση διαφημίσεων</li>
+                  </ul>
+                </div>
+
+                {/* 2. Lifetime Συνδρομή */}
+                <div className="bg-gradient-to-b from-slate-900 to-slate-900/50 border border-amber-500/40 rounded-3xl p-6 md:p-8 flex flex-col gap-6 relative shadow-[0_0_40px_rgba(245,158,11,0.05)] hover:border-amber-500 transition">
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 text-xs font-bold px-4 py-1 rounded-full shadow-lg">
+                    ΚΑΛΥΤΕΡΗ ΕΠΙΛΟΓΗ
+                  </div>
+                  
+                  <div>
+                    <h3 className="text-xl font-bold text-amber-400">Lifetime Πρόσβαση</h3>
+                    <p className="text-sm text-slate-400 mt-1">Εφάπαξ πληρωμή. Πρόσβαση για πάντα.</p>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    {/* Standard Price */}
+                    <button 
+                      onClick={() => handleMockCheckout('lifetime', 'card')}
+                      className="flex items-center justify-between p-4 bg-slate-950 rounded-2xl border border-slate-800 hover:border-amber-500/50 transition group"
+                    >
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="text-sm font-medium text-slate-300">Κάρτα / Apple / Google Pay</span>
+                        <div className="flex items-center gap-2 text-slate-500 group-hover:text-amber-400 transition">
+                          <CreditCard className="w-4 h-4" />
+                          <Smartphone className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xl font-bold text-slate-100">14,99€</span>
+                        <span className="text-xs text-slate-500 block">εφάπαξ</span>
+                      </div>
+                    </button>
+
+                    {/* Bitcoin Price */}
+                    <button 
+                      onClick={() => handleMockCheckout('lifetime', 'btc')}
+                      className="flex items-center justify-between p-4 bg-slate-950 rounded-2xl border border-emerald-500/30 hover:border-emerald-500 transition relative group"
+                    >
+                      {/* Green Badge */}
+                      <div className="absolute -top-2.5 -right-2.5 bg-emerald-500 text-slate-950 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full shadow-lg">
+                        -20%
+                      </div>
+                      
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="text-sm font-medium text-emerald-400">Πληρωμή με Bitcoin</span>
+                        <Bitcoin className="w-4 h-4 text-emerald-500/70 group-hover:text-emerald-400 transition" />
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xl font-bold text-emerald-400">12,99€</span>
+                        <span className="text-xs text-emerald-600 block">εφάπαξ</span>
+                      </div>
+                    </button>
+                  </div>
+
+                  <div className="h-px w-full bg-slate-800 my-2"></div>
+                  
+                  <ul className="flex flex-col gap-3 text-sm text-slate-300">
+                    <li className="flex items-start gap-2"><Check className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" /> Όλα τα προνόμια της μηνιαίας έκδοσης</li>
+                    <li className="flex items-start gap-2"><Check className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" /> <strong>Δια βίου πρόσβαση</strong> στην πλατφόρμα</li>
+                    <li className="flex items-start gap-2"><Check className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" /> Δωρεάν μελλοντικές αναβαθμίσεις</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ) : mode === 'account' ? (
+            /* SECTION: ΔΙΑΧΕΙΡΙΣΗ ΛΟΓΑΡΙΑΣΜΟΥ */
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 flex flex-col gap-6 shadow-xl max-w-4xl mx-auto w-full">
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                 <div className="flex items-center gap-3">
                   <div className="p-3 bg-sky-500/10 border border-sky-500/20 rounded-xl">
@@ -604,45 +863,9 @@ export default function HomePage() {
                 </button>
               </div>
             </div>
-          ) : mode === 'mistakes' && profile?.subscription_status !== 'pro' ? (
-            /* Lock Screen για Quiz Λανθασμένων Ερωτήσεων */
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center gap-4">
-              <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-2xl">
-                <Lock className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-bold">Quiz Λανθασμένων Ερωτήσεων (PRO)</h3>
-              <p className="text-slate-400 text-sm max-w-md">
-                Αυτή η λειτουργία είναι διαθέσιμη αποκλειστικά για τους <strong>PRO συνδρομητές</strong>. Αποθηκεύει αυτόματα τις ερωτήσεις στις οποίες κάνατε λάθος ώστε να τις επαναλαμβάνετε στοχευμένα!
-              </p>
-              <button 
-                onClick={handleUpgradeToPro}
-                disabled={isUpgrading}
-                className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold px-6 py-2.5 rounded-xl transition text-sm flex items-center gap-2"
-              >
-                {isUpgrading ? 'Μεταφορά στο Ταμείο...' : 'Αναβάθμιση σε Pro (9.99€/μήνα)'}
-              </button>
-            </div>
-          ) : mode === 'mock' && profile?.subscription_status !== 'pro' ? (
-            /* Lock Screen για Mock Exams */
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center gap-4">
-              <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl">
-                <Lock className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-bold">Ξεκλειδώστε τα 15 Πλήρη Mock Exams</h3>
-              <p className="text-slate-400 text-sm max-w-md">
-                Αποκτήστε πρόσβαση σε 15 ρεαλιστικές προσομοιώσεις εξετάσεων πιστοποίησης Security με 20 ερωτήσεις και χρονόμετρο 60 λεπτών, χωρίς διαφημίσεις.
-              </p>
-              <button 
-                onClick={handleUpgradeToPro}
-                disabled={isUpgrading}
-                className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold px-6 py-2.5 rounded-xl transition text-sm flex items-center gap-2"
-              >
-                {isUpgrading ? 'Μεταφορά στο Ταμείο...' : 'Αναβάθμιση σε Pro (9.99€/μήνα)'}
-              </button>
-            </div>
           ) : isLimitReached ? (
             /* Lock Screen Εξάντλησης Ημερήσιου Ορίου */
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center gap-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center gap-4 max-w-4xl mx-auto w-full">
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl">
                 <Award className="w-8 h-8" />
               </div>
@@ -677,30 +900,65 @@ export default function HomePage() {
                     Φτάσατε το μέγιστο όριο των <strong>30 ερωτήσεων</strong> για σήμερα. Επιστρέψτε αύριο ή αναβαθμίστε σε Pro για απεριόριστη πρόσβαση.
                   </p>
                   <button
-                    onClick={handleUpgradeToPro}
-                    disabled={isUpgrading}
+                    onClick={() => setMode('pricing')}
                     className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2 rounded-xl transition text-xs"
                   >
-                    {isUpgrading ? 'Μεταφορά...' : 'Απεριόριστα με Pro'}
+                    Απεριόριστα με Pro
                   </button>
                 </div>
               )}
             </div>
-          ) : isExamCompleted ? (
-            /* Οθόνη Τελικού Σκορ */
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center gap-4">
-              <CheckCircle2 className="w-12 h-12 text-emerald-400" />
-              <h3 className="text-2xl font-bold">Ολοκληρώθηκε!</h3>
-              <p className="text-slate-300 text-base">
-                Το σκορ σας: <span className="text-emerald-400 font-bold">{score}</span> / {activeQuestions.length} ({Math.round((score / activeQuestions.length) * 100)}%)
+          ) : mode === 'mistakes' && activeQuestions.length === 0 ? (
+            /* Κενή κατάσταση: δεν υπάρχουν λανθασμένες ερωτήσεις */
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center gap-4 max-w-4xl mx-auto w-full">
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold">Δεν υπάρχουν λανθασμένες ερωτήσεις!</h3>
+              <p className="text-slate-400 text-sm max-w-md">
+                Οι ερωτήσεις που απαντάτε λάθος στο <strong>Quiz</strong> και στην <strong>Προσομοίωση Εξετάσεων</strong> θα εμφανίζονται εδώ για στοχευμένη επανάληψη.
               </p>
               <button
                 onClick={() => {
+                  setMode('practice');
                   setCurrentIdx(0);
                   setScore(0);
                   setSelectedAnswer(null);
                   setIsAnswered(false);
                   setIsExamCompleted(false);
+                }}
+                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition flex items-center gap-2 text-sm"
+              >
+                <BookOpen className="w-4 h-4" /> Μετάβαση στο Quiz
+              </button>
+            </div>
+          ) : isExamCompleted ? (
+            /* Οθόνη Τελικού Σκορ */
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center gap-4 max-w-4xl mx-auto w-full">
+              <CheckCircle2 className="w-12 h-12 text-emerald-400" />
+              <h3 className="text-2xl font-bold">Ολοκληρώθηκε!</h3>
+              <p className="text-slate-300 text-base">
+                Το σκορ σας: <span className="text-emerald-400 font-bold">{score}</span> / {activeQuestions.length} ({activeQuestions.length > 0 ? Math.round((score / activeQuestions.length) * 100) : 0}%)
+              </p>
+              {mode === 'mistakes' && (
+                <p className="text-slate-400 text-sm">
+                  {mistakeIds.length > 0
+                    ? <>Απομένουν <strong className="text-rose-300">{mistakeIds.length}</strong> λανθασμένες ερωτήσεις προς επανάληψη.</>
+                    : 'Συγχαρητήρια! Δεν έχετε άλλες λανθασμένες ερωτήσεις.'}
+                </p>
+              )}
+              <button
+                onClick={() => {
+                  if (mode === 'mistakes') {
+                    startMistakesSession();
+                    return;
+                  }
+                  setCurrentIdx(0);
+                  setScore(0);
+                  setSelectedAnswer(null);
+                  setIsAnswered(false);
+                  setIsExamCompleted(false);
+                  if (mode === 'mock') setTimeLeft(60 * 60);
                 }}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold px-5 py-2.5 rounded-xl border border-slate-700 transition flex items-center gap-2 text-sm"
               >
@@ -709,7 +967,7 @@ export default function HomePage() {
             </div>
           ) : (
             /* Κύρια Κάρτα Ερώτησης */
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 flex flex-col gap-6 shadow-xl">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 flex flex-col gap-6 shadow-xl max-w-4xl mx-auto w-full">
               <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
                 <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-md">
                   Ερώτηση {currentIdx + 1} από {activeQuestions.length}
@@ -719,13 +977,17 @@ export default function HomePage() {
                     <Clock className="w-4 h-4" /> {formatTimer(timeLeft)}
                   </span>
                 )}
+                {mode === 'mistakes' && (
+                  <span className="flex items-center gap-1.5 text-rose-300 font-semibold text-xs bg-rose-500/10 border border-rose-500/20 px-2.5 py-1 rounded-md">
+                    <XCircle className="w-4 h-4" /> Απομένουν: {mistakeIds.length}
+                  </span>
+                )}
               </div>
 
               <h3 className="text-lg md:text-xl font-semibold leading-relaxed">
                 {activeQuestions[currentIdx]?.text}
               </h3>
 
-              {/* Επιλογές Απαντήσεων */}
               <div className="grid grid-cols-1 gap-2.5">
                 {activeQuestions[currentIdx]?.options.map((opt, idx) => {
                   let btnStyle = 'border-slate-800 bg-slate-950/60 hover:border-slate-700';
@@ -768,9 +1030,11 @@ export default function HomePage() {
             </div>
           )}
 
-          <div className="w-full bg-slate-900 border border-dashed border-slate-800 rounded-xl py-3 text-center text-xs text-slate-500">
-            Διαφήμιση Google AdSense (Bottom Leaderboard)
-          </div>
+          {mode !== 'pricing' && (
+            <div className="w-full bg-slate-900 border border-dashed border-slate-800 rounded-xl py-3 text-center text-xs text-slate-500 max-w-4xl mx-auto">
+              Διαφήμιση Google AdSense (Bottom Leaderboard)
+            </div>
+          )}
         </main>
       </div>
 
